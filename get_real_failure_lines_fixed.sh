@@ -123,10 +123,35 @@ for logfile in *.log; do
             txn_leg = leg_arr[1]
         }
         
-        # Extract EXTRC
-        if (/EXTRC:/ && extrc_line == "") {
+        # Extract EXTRC (traditional format)
+        if (/EXTRC:/) {
             match($0, /EXTRC: ([^\n\r]+)/, extrc_arr)
-            extrc_line = extrc_arr[1]
+            if (extrc_arr[1] != "") {
+                if (extrc_line == "") {
+                    extrc_line = extrc_arr[1]
+                } else {
+                    # Multiple EXTRC, append with separator
+                    extrc_line = extrc_line "; " extrc_arr[1]
+                }
+            }
+        }
+        
+        # Extract error codes from XML format and categorize by source
+        if (/errCode="[^"]*"/) {
+            match($0, /errCode="([^"]*)"/, err_arr)
+            if (err_arr[1] != "" && err_arr[1] != "00") {
+                # Check if this is from external systems (PSO/CBS/UPI/TOMAS)
+                if ((txn_type ~ /^PSO\./) || (/CBS/) || (/UPI/) || (/TOMAS/) || (/orgCode="/) || (/orgStatus="/)) {
+                    if (extrc_line == "") {
+                        extrc_line = "XML errCode: " err_arr[1]
+                    }
+                } else {
+                    # Internal system error - UseRC
+                    if (use_rc_line == "") {
+                        use_rc_line = "XML errCode: " err_arr[1]
+                    }
+                }
+            }
         }
         
         # Collect actual failure patterns (key error indicators)
@@ -136,7 +161,12 @@ for logfile in *.log; do
             (/TARGET_POJO is NULL/) ||
             (/<message>.*<\/message>/ && !/Transaction Successful/) ||
             (/Count check.*FAILED/) ||
-            (/Use RC :/ && !/Use RC : 00/)) {
+            (/Use RC :/ && !/Use RC : 00/) ||
+            (/errCode="[^0][^"]+"/) ||  # XML errCode not starting with 0
+            (/result="FAILURE"/) ||
+            (/respCode="[^0][^"]+"/) ||  # XML respCode not starting with 0
+            (/<Resp.*result="FAILURE"/) ||
+            (/orgStatus="FAILURE"/)) {
             
             # Add to failure lines collection
             if (failure_lines == "") {
@@ -149,6 +179,81 @@ for logfile in *.log; do
         # Extract Use RC lines with errors (not success)
         if (/Use RC :/ && !/Use RC : 00/ && !/Use RC : 0,/) {
             use_rc_line = $0
+        }
+        
+        # Also extract response codes from XML format and categorize by source
+        if (/respCode="[^"]*"/) {
+            match($0, /respCode="([^"]*)"/, resp_arr)
+            if (resp_arr[1] != "" && resp_arr[1] != "00") {
+                # Check if this is from external systems (PSO/CBS/UPI/TOMAS)
+                if ((txn_type ~ /^PSO\./) || (/CBS/) || (/UPI/) || (/TOMAS/) || (/orgCode="/) || (/orgStatus="/)) {
+                    if (extrc_line == "") {
+                        extrc_line = "XML respCode: " resp_arr[1]
+                    }
+                } else {
+                    # Internal system error - UseRC
+                    if (use_rc_line == "") {
+                        use_rc_line = "XML respCode: " resp_arr[1]
+                    }
+                }
+            }
+        }
+        
+        # Extract error codes from JSON format
+        if (/"errCode":"[^"]*"/) {
+            match($0, /"errCode":"([^"]*)"/, json_err_arr)
+            if (json_err_arr[1] != "" && json_err_arr[1] != "00") {
+                # Check if this is from external systems (PSO/CBS/UPI/TOMAS)
+                if ((txn_type ~ /^PSO\./) || (/CBS/) || (/UPI/) || (/TOMAS/)) {
+                    if (extrc_line == "") {
+                        extrc_line = "JSON errCode: " json_err_arr[1]
+                    }
+                } else {
+                    # Internal system error (BACKOFFICE, APP internal) - UseRC
+                    if (use_rc_line == "") {
+                        use_rc_line = "JSON errCode: " json_err_arr[1]
+                    }
+                }
+            }
+        }
+        
+        # Extract RC field (usually from original transaction context)
+        if (/^      RC: / || /,rc=/ || /"rc":"/ || /"orgRc":"/) {
+            rc_value = ""
+            if (match($0, /^      RC: (.+)$/, rc_match)) {
+                rc_value = rc_match[1]
+            } else if (match($0, /,rc=([^,}]+)/, rc_match)) {
+                rc_value = rc_match[1]
+            } else if (match($0, /"rc":"([^"]+)"/, rc_match)) {
+                rc_value = rc_match[1]
+            } else if (match($0, /"orgRc":"([^"]+)"/, rc_match)) {
+                rc_value = rc_match[1]
+            }
+            
+            if (rc_value != "" && rc_value != "00" && rc_value != "null" && rc_value != "<null>") {
+                # For BACKOFFICE.ResolveStatus, RC usually comes from original external transaction
+                if (txn_type ~ /^BACKOFFICE\./) {
+                    # Avoid duplicates
+                    if (extrc_line == "" || index(extrc_line, rc_value) == 0) {
+                        if (extrc_line == "") {
+                            extrc_line = "Original RC: " rc_value
+                        } else {
+                            extrc_line = extrc_line "; Original RC: " rc_value
+                        }
+                    }
+                } else {
+                    # For other transaction types, treat as UseRC if internal, ExtRC if external
+                    if ((txn_type ~ /^PSO\./) || (/CBS/) || (/UPI/) || (/TOMAS/)) {
+                        if (extrc_line == "") {
+                            extrc_line = "RC: " rc_value
+                        }
+                    } else {
+                        if (use_rc_line == "") {
+                            use_rc_line = "RC: " rc_value
+                        }
+                    }
+                }
+            }
         }
     }
     
@@ -174,7 +279,13 @@ for logfile in *.log; do
                 print "4. Use RC: [NOT FOUND]"
             }
             
-            print "5. Block Type: ABORT"
+            if (extrc_line != "") {
+                print "5. Ext RC: " extrc_line
+            } else {
+                print "5. Ext RC: [NOT FOUND]"
+            }
+            
+            print "6. Block Type: ABORT"
             print "========================="
             print ""
             
@@ -212,9 +323,34 @@ echo "======================================================="
 # Count unique transaction IDs
 unique_txn_count=$(awk '/^1\. TxnID:/ { print substr($0, 11) }' "$tmpfile" | sort -u | wc -l)
 
+# Count transactions with no failure reasons (no UseRC and no ExtRC)
+no_failure_reason_count=0
+if [ -s "$tmpfile" ]; then
+    no_failure_reason_count=$(awk '
+    BEGIN { 
+        in_block = 0; count = 0
+        has_use_rc = 0; has_extrc = 0
+    }
+    /^=== ABORT TRANSACTION ===/ { 
+        in_block = 1; has_use_rc = 0; has_extrc = 0
+        next 
+    }
+    in_block {
+        if ($0 ~ /Use RC :/ && $0 !~ /\[NOT FOUND\]/) has_use_rc = 1
+        if ($0 ~ /EXTRC:/ && $0 !~ /^[ \t]*$/) has_extrc = 1
+    }
+    in_block && /^=========================/ { 
+        if (has_use_rc == 0 && has_extrc == 0) count++
+        in_block = 0 
+    }
+    END { print count }
+    ' "$tmpfile")
+fi
+
 echo "Total transactions processed: $total_txn_count"
 echo "Total failed transactions: $abort_count"
 echo "Unique failed transaction IDs: $unique_txn_count"
+echo "Transactions with no failure reasons: $no_failure_reason_count"
 
 # Display based on selected mode
 if [ "$DISPLAY_MODE" = "tsv" ]; then
@@ -242,19 +378,19 @@ if [ "$DISPLAY_MODE" = "tsv" ]; then
             txn_id = substr($0, 11) 
         }
         in_block {
-            # Look for Use RC patterns anywhere in the block
-            if ($0 ~ /Use RC :/ && use_rc_count < 4) {
-                if (match($0, /Use RC : ([^,\n\r]+)/, rc_match)) {
+            # Look for Use RC patterns in format "4. Use RC: content"
+            if ($0 ~ /^4\. Use RC: / && use_rc_count < 4 && $0 !~ /\[NOT FOUND\]/) {
+                if (match($0, /^4\. Use RC: (.+)$/, rc_match)) {
                     use_rc_count++
                     use_rc[use_rc_count] = rc_match[1]
                 }
             }
-            # Look for EXTRC patterns anywhere in the block
-            if ($0 ~ /EXTRC:/ && extrc_count < 2) {
-                extrc_count++
-                extrc_value = substr($0, match($0, /EXTRC:/) + 6)
-                gsub(/^[ \t]+|[ \t]+$/, "", extrc_value)
-                extrc[extrc_count] = extrc_value
+            # Look for Ext RC patterns in format "5. Ext RC: content"
+            if ($0 ~ /^5\. Ext RC: / && extrc_count < 2 && $0 !~ /\[NOT FOUND\]/) {
+                if (match($0, /^5\. Ext RC: (.+)$/, extrc_match)) {
+                    extrc_count++
+                    extrc[extrc_count] = extrc_match[1]
+                }
             }
         }
         in_block && /^=========================/ { 
@@ -387,6 +523,58 @@ fi
 cp "$tmpfile" abort_failures.txt
 echo ""
 echo "Detailed analysis saved to: abort_failures.txt"
+
+# Create TSV table file with timestamp
+current_date=$(date +%Y%m%d_%H%M%S)
+tsv_file="table_failed_txn_${current_date}.txt"
+
+echo "Creating TSV table file: $tsv_file"
+echo ""
+
+# Generate TSV table and save to file
+echo -e "TxnID\tUseRC1\tUseRC2\tUseRC3\tUseRC4\tExtRC1\tExtRC2" > "$tsv_file"
+
+if [ -s "$tmpfile" ]; then
+    awk '
+    BEGIN { 
+        in_block = 0
+    }
+    /^=== ABORT TRANSACTION ===/ { 
+        in_block = 1
+        txn_id = ""
+        use_rc_count = 0
+        extrc_count = 0
+        for (i = 1; i <= 4; i++) use_rc[i] = ""
+        for (i = 1; i <= 2; i++) extrc[i] = ""
+        next 
+    }
+    in_block && /^1\. TxnID:/ { 
+        txn_id = substr($0, 11) 
+    }
+    in_block {
+        # Look for Use RC patterns in format "4. Use RC: content"
+        if ($0 ~ /^4\. Use RC: / && use_rc_count < 4 && $0 !~ /\[NOT FOUND\]/) {
+            if (match($0, /^4\. Use RC: (.+)$/, rc_match)) {
+                use_rc_count++
+                use_rc[use_rc_count] = rc_match[1]
+            }
+        }
+        # Look for Ext RC patterns in format "5. Ext RC: content"
+        if ($0 ~ /^5\. Ext RC: / && extrc_count < 2 && $0 !~ /\[NOT FOUND\]/) {
+            if (match($0, /^5\. Ext RC: (.+)$/, extrc_match)) {
+                extrc_count++
+                extrc[extrc_count] = extrc_match[1]
+            }
+        }
+    }
+    in_block && /^=========================/ { 
+        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", txn_id, use_rc[1], use_rc[2], use_rc[3], use_rc[4], extrc[1], extrc[2]
+        in_block = 0 
+    }
+    ' "$tmpfile" >> "$tsv_file"
+fi
+
+echo "TSV table saved to: $tsv_file"
 
 # Cleanup
 rm -f "$tmpfile"

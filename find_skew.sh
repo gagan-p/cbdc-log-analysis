@@ -106,6 +106,14 @@ COMPLETE_BLOCKS=$(awk '
   END { print (blocks+0) }
 ' "$@")
 
+# Count blocks that contain a client <Head ... ts="..."> timestamp (all files)
+CLIENT_TS_BLOCKS=$(awk '
+  /<log[^"]*realm="org\.jpos\.transaction\.TransactionManager"/ { in_tx=1; has_ts=0; next }
+  in_tx && /<Head / { if (match($0, /ts="([^"]+)"/, a)) has_ts=1 }
+  in_tx && /<\/log>/ { if (has_ts) cnt++; in_tx=0; next }
+  END { print (cnt+0) }
+' "$@")
+
 # Extract (file|server_at|client_ts|txn_type|msg_id|txn_id)
 records=$(awk '
   /<log[^>]*realm="org\.jpos\.transaction\.TransactionManager"/ {
@@ -134,22 +142,16 @@ records=$(awk '
 # Function: ISO8601 to epoch ms (best-effort)
 to_epoch_ms() {
   ts="$1"
-  # split fractional seconds if present
-  base="$ts"
+  # Always interpret as UTC irrespective of any timezone suffix
   frac_ms=0
-  case "$ts" in
-    *.*)
-      base="${ts%%.*}"
-      frac="${ts#*.}"
-      # trim timezone suffix if any
-      frac="${frac%Z}"
-      # keep first 3 digits as ms
-      frac_ms=$(printf "%s" "$frac" | sed 's/[^0-9].*$//' | cut -c1-3)
-      [ -z "$frac_ms" ] && frac_ms=0
-      ;;
-  esac
-  sec=$(date -d "$ts" +%s 2>/dev/null || date -d "$base" +%s 2>/dev/null || echo 0)
-  # Convert fractional ms safely to base-10 using awk (avoids octal interpretation)
+  if printf "%s" "$ts" | grep -q '\\.'; then
+    frac=$(printf "%s" "$ts" | sed 's/^[^.]*\\.//')
+    frac_ms=$(printf "%s" "$frac" | sed 's/[^0-9].*$//' | cut -c1-3)
+    [ -z "$frac_ms" ] && frac_ms=0
+  fi
+  base=$(printf "%s" "$ts" | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}T[0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\}\).*/\1/p')
+  [ -z "$base" ] && base="$ts"
+  sec=$(date -u -d "$base" +%s 2>/dev/null || echo 0)
   frac_val=$(printf "%s" "$frac_ms" | awk '{print ($0+0)}')
   printf "%d" $(( sec*1000 + frac_val ))
 }
@@ -165,6 +167,7 @@ build_rows() {
         PSO) printf "%s" "$txn_type" | grep -q '^PSO\.' || continue ;;
       esac
     fi
+    # Treat both timestamps as UTC (ignore any provided timezone offsets)
     sa_ms=$(to_epoch_ms "$server_at")
     ct_ms=$(to_epoch_ms "$client_ts")
     skew_ms=$(( ct_ms - sa_ms ))
@@ -199,8 +202,9 @@ if [ -z "$TSV" ]; then
   echo "- sh find_skew.sh --pso --all --tsv"
   echo ""
   echo "Totals:"
-  echo "- Total Transactions processed: ${TOTAL_PROCESSED:-0}"
+  echo "- Blocks with client+server timestamps: ${TOTAL_PROCESSED:-0}"
   echo "- Total complete <log> blocks processed: ${COMPLETE_BLOCKS:-0}"
+  echo "- Blocks with client timestamp: ${CLIENT_TS_BLOCKS:-0} (missing: $((COMPLETE_BLOCKS-CLIENT_TS_BLOCKS)))"
   echo "- Total skewed Transactions (threshold=${THRESHOLD_S}s): ${TOTAL_SKEWED_THR:-0}"
   echo "- Total skewed > 60s: ${SKEW_GT_60:-0} (${PCT_GT_60}% of processed)"
   echo "- Total unique Transaction IDs processed: ${UNIQUE_IDS:-0}"
