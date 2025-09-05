@@ -1,0 +1,22 @@
+# Log files
+*.log
+
+# Output files
+*.txt
+abort_failures.txt
+failed_5lines_analysis.txt
+failed_txnmanager_analysis.txt
+failure_analysis_output.txt
+real_failures_analysis.txt
+cbdc_metrics_report.md
+table1
+table2
+
+# Cache files
+.cbdc_analysis_cache*
+
+# Zone Identifier files (Windows)
+*:Zone.Identifier
+
+# Temporary files
+*.tmp
