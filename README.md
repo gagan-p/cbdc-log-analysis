@@ -36,6 +36,8 @@ The primary tool for analyzing transaction failures in CBDC logs.
 - Unique failed transaction IDs
 - Dynamic failure pattern grouping
 - Detailed transaction-by-transaction analysis
+- **Automatic TSV export:** `table_failed_txn_YYYYMMDD_HHMMSS.txt`
+- **Detailed analysis file:** `abort_failures.txt`
 
 ### 2. System Load Analysis
 **File:** `analyze_system_load.sh`
@@ -47,7 +49,24 @@ Analyzes system performance metrics from transaction logs.
 - `analyze_transactions.sh` - Basic transaction analysis
 - `analyze_transactions_aggregate.sh` - Aggregated metrics with caching
 
-### 4. Simple CBDC Report Generator  
+### 4. Transaction Block Finder
+**File:** `find_log_block_by_txnid.sh`
+
+Finds complete `<log>...</log>` blocks by transaction ID for detailed investigation.
+
+**Usage:**
+```bash
+# Find all blocks containing a transaction ID
+./find_log_block_by_txnid.sh TXNID --all-blocks
+
+# Show only which file contains the transaction
+./find_log_block_by_txnid.sh TXNID --file-only
+
+# Show first N lines of the block
+./find_log_block_by_txnid.sh TXNID --show-lines 20
+```
+
+### 5. Simple CBDC Report Generator  
 **File:** `simple_cbdc_report.sh`
 
 Generates executive summary reports with top transaction types by performance metrics.
@@ -80,16 +99,37 @@ The `--tsv-table` option provides a 7-column tab-separated format:
 
 Empty columns indicate values not available for that transaction.
 
-## Example Results
+## Key Achievements
 
-From analyzing 15,077 transactions across multiple log files:
+### Complete Error Code Coverage
+Our enhanced analysis successfully identified error codes for **ALL 148 failed transactions** (100% coverage):
+- **0 transactions without error reasons** (previously had 49+ unknown failures)
+- **Multi-format error detection:** Traditional patterns, XML-embedded codes, JSON-embedded codes, and original RC fields
+- **Smart categorization:** Automatically distinguishes between internal (UseRC) and external (ExtRC) error sources
+
+### Analysis Results
+From analyzing 15,077 transactions across 7 log files:
+- **Total transactions processed:** 15,077
 - **Total failed transactions:** 148 (0.98% failure rate)
-- **Unique failed transactions:** 140
-- **Top failure patterns:**
-  - 42 cases: `java.lang.NullPointerException`
-  - 15 cases: `Use RC : 96,Unable to Process`
-  - 12 cases: `Use RC : ZH,INVALID VIRTUAL ADDRESS`
-  - 8 cases: Transaction limit exceeded
+- **Unique failed transaction IDs:** 140
+- **Error code coverage:** 100% (all failures have identified error codes)
+
+### Automated TSV Export
+- **Timestamped files:** `table_failed_txn_YYYYMMDD_HHMMSS.txt`
+- **7-column format:** TxnID + 4 UseRC + 2 ExtRC columns
+- **Ready for analysis:** Direct import into Excel/databases
+
+### Enhanced Error Detection
+The tool now detects errors from multiple sources:
+1. **Traditional patterns:** `Use RC :`, `EXTRC:`
+2. **XML-embedded:** `errCode="U30"`, `respCode="ZM"`
+3. **JSON-embedded:** `"errCode":"96"`
+4. **Original context:** `"orgRc":"BT"` from BACKOFFICE transactions
+
+### Smart Categorization Logic
+- **PSO/CBS/UPI/TOMAS transactions** → ExtRC (external system errors)
+- **BACKOFFICE/APP internal** → UseRC (internal system errors)  
+- **BACKOFFICE original errors** → ExtRC (inherited from external transaction timeouts)
 
 ## Contributing
 
