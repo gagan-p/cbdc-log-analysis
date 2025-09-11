@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Prefer GNU awk if available (macOS compatibility)
 if command -v gawk >/dev/null 2>&1; then AWK="gawk"; else AWK="awk"; fi
@@ -21,6 +21,27 @@ while :; do
   fi
   break
 done
+
+# Caching: include threshold/top/filter/tsv/all in signature
+. scripts/helper/cache_utils.sh
+ARGS_SIG="THRESH=$THRESHOLD_S;TOP=$TOP_N;FILTER=$FILTER;TSV=$TSV;ALL=$ALL"
+cache_prepare "find_skew" "$0" "$ARGS_SIG" "$@"
+
+if [ "$CACHE_STATUS" = "noop" ]; then
+  echo "No changes detected (inputs and script unchanged). Skipping run."
+  echo "Previous outputs: $CACHE_LAST_OUTPUTS"
+  exit 0
+elif [ "$CACHE_STATUS" = "duplicate" ]; then
+  echo "Inputs unchanged; script changed. Duplicating previous outputs with new timestamp."
+  cache_duplicate_outputs
+  cache_save_meta
+  echo "New outputs: $CACHE__OUTPUTS"
+  exit 0
+fi
+
+OUT_FILE="$CACHE_OUT_DIR/find_skew_${CACHE_TS}.txt"
+cache_register_output "$OUT_FILE"
+exec > >(tee "$OUT_FILE") 2>&1
 
 # Find client-server timestamp skew in CBDC logs
 # - Scans *.log for TransactionManager <log ... at="..."> and client <Head ... ts="...">

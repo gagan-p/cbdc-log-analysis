@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Prefer GNU awk if available (macOS compatibility)
 if command -v gawk >/dev/null 2>&1; then AWK="gawk"; else AWK="awk"; fi
@@ -101,7 +101,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# Always prompt for logs dir (default to existing LOGDIR or rtsp_logs)
+# Always prompt for logs dir (no defaults)
 while :; do
   read -r -p "Enter path to rtsp_q2 log repo (directory). Files must match rtsp_q2-*.log: " LOGDIR
   if [ -z "$LOGDIR" ]; then
@@ -116,6 +116,27 @@ while :; do
   break
 done
 
+# Caching: prepare status and maybe short-circuit
+. scripts/helper/cache_utils.sh
+ARGS_SIG="FILTER=$FILTER;TOP_ONLY=$TOP_ONLY;TOP_N=$TOP_N;TOP_BY=$TOP_METRIC;COMPACT=$COMPACT;RAW=$RAW"
+cache_prepare "simple_cbdc_report" "$0" "$ARGS_SIG" "$@"
+
+if [ "$CACHE_STATUS" = "noop" ]; then
+  echo "No changes detected (inputs and script unchanged). Skipping run."
+  echo "Previous outputs: $CACHE_LAST_OUTPUTS"
+  exit 0
+elif [ "$CACHE_STATUS" = "duplicate" ]; then
+  echo "Inputs unchanged; script changed. Duplicating previous outputs with new timestamp."
+  cache_duplicate_outputs
+  cache_save_meta
+  echo "New outputs: $CACHE__OUTPUTS"
+  exit 0
+fi
+
+# Capture output to a timestamped file under scripts/output while also printing
+OUT_FILE="$CACHE_OUT_DIR/simple_cbdc_report_${CACHE_TS}.txt"
+cache_register_output "$OUT_FILE"
+exec > >(tee "$OUT_FILE") 2>&1
 echo "======================================================"
 echo "CBDC Transaction Analysis Report"
 echo "Generated: $(date)"
@@ -405,4 +426,6 @@ fi
 printf "%s\n" "$summary" | sed -n '0,/^=== ADDITIONAL DETAILED DATA ===/d;p'
 
 echo ""
+echo "Saved report: $OUT_FILE"
+cache_save_meta
 exit 0

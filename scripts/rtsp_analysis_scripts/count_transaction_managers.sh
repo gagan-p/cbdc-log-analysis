@@ -18,6 +18,27 @@ while :; do
 done
 
 echo "=== TransactionManager Instance Analysis ==="
+
+# Caching: no script args; use input logs
+. scripts/helper/cache_utils.sh
+ARGS_SIG=""
+cache_prepare "count_transaction_managers" "$0" "$ARGS_SIG" "$LOGDIR"/rtsp_q2-*.log
+
+if [ "$CACHE_STATUS" = "noop" ]; then
+  echo "No changes detected (inputs and script unchanged). Skipping run."
+  echo "Previous outputs: $CACHE_LAST_OUTPUTS"
+  exit 0
+elif [ "$CACHE_STATUS" = "duplicate" ]; then
+  echo "Inputs unchanged; script changed. Duplicating previous outputs with new timestamp."
+  cache_duplicate_outputs
+  cache_save_meta
+  echo "New outputs: $CACHE__OUTPUTS"
+  exit 0
+fi
+
+OUT_FILE="$CACHE_OUT_DIR/count_transaction_managers_${CACHE_TS}.txt"
+cache_register_output "$OUT_FILE"
+exec > >(tee "$OUT_FILE") 2>&1
 echo "Logs directory will be requested interactively"
 echo ""
 
@@ -62,3 +83,5 @@ echo "=== Summary ==="
 echo "Based on session pool analysis, the system appears to have:"
 echo "- Pool sizes indicate separate TransactionManager instances"
 echo "- Each pool size represents a distinct TransactionManager configuration"
+echo "Saved output: $OUT_FILE"
+cache_save_meta

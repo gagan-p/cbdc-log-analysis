@@ -22,6 +22,27 @@ echo "=== In-Transit Queue Depth Analysis ==="
 echo "Generated: $(date)"
 echo ""
 
+# Caching: no script args; use input logs
+. scripts/helper/cache_utils.sh
+ARGS_SIG=""
+cache_prepare "analyze_queue_depths" "$0" "$ARGS_SIG" "$LOGDIR"/rtsp_q2-*.log
+
+if [ "$CACHE_STATUS" = "noop" ]; then
+  echo "No changes detected (inputs and script unchanged). Skipping run."
+  echo "Previous outputs: $CACHE_LAST_OUTPUTS"
+  exit 0
+elif [ "$CACHE_STATUS" = "duplicate" ]; then
+  echo "Inputs unchanged; script changed. Duplicating previous outputs with new timestamp."
+  cache_duplicate_outputs
+  cache_save_meta
+  echo "New outputs: $CACHE__OUTPUTS"
+  exit 0
+fi
+
+OUT_FILE="$CACHE_OUT_DIR/analyze_queue_depths_${CACHE_TS}.txt"
+cache_register_output "$OUT_FILE"
+exec > >(tee "$OUT_FILE") 2>&1
+
 echo "=== Raw Data Extraction ==="
 echo "Extracting in-transit values from all log files..."
 
@@ -102,3 +123,6 @@ echo "To verify these results, run:"
 echo "1. Extract all in-transit values: find $LOGDIR -type f -name 'rtsp_q2-*.log' -exec grep 'in-transit=' {} \\; | sed 's/.*in-transit=\\([0-9]*\\)\\/\\([0-9]*\\).*/\\1/' | sort -nr"
 echo "2. Find peak value location: find $LOGDIR -type f -name 'rtsp_q2-*.log' -exec grep -n 'in-transit=$max_val/' {} \\;"
 echo "3. Count total measurements: find $LOGDIR -type f -name 'rtsp_q2-*.log' -exec grep 'in-transit=' {} \\; | wc -l"
+
+echo "Saved output: $OUT_FILE"
+cache_save_meta
