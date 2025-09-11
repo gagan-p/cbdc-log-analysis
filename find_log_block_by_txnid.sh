@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# Prefer GNU awk if available (macOS compatibility)
+if command -v gawk >/dev/null 2>&1; then AWK="gawk"; else AWK="awk"; fi
+
+# Logs directory is chosen interactively at runtime (no flags/env required)
+
 # find_log_block_by_txnid.sh - Find complete <log>...</log> block by transaction ID
 #
 # USAGE: ./find_log_block_by_txnid.sh TXNID [OPTIONS]
@@ -63,11 +68,23 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# Always prompt for logs dir (default to existing LOGDIR or rtsp_logs)
+while :; do
+    read -r -p "Enter path to rtsp_q2 log repo (directory). Files must match rtsp_q2-*.log: " LOGDIR
+    if [ -z "$LOGDIR" ]; then
+        echo "Path is required."
+        continue
+    fi
+    set -- "$LOGDIR"/rtsp_q2-*.log
+    if [ "$1" = "$LOGDIR/rtsp_q2-*.log" ] || [ $# -eq 0 ]; then
+        echo "ERROR: No rtsp_q2-*.log files found in $LOGDIR"
+        continue
+    fi
+    break
+done
+
 # Check if .log files exist
-if ! ls *.log >/dev/null 2>&1; then
-    echo "ERROR: No .log files found in current directory"
-    exit 1
-fi
+# Files are now in "$@" from the prompt validation above
 
 echo "======================================================="
 echo "SEARCHING FOR TRANSACTION ID: $TXNID"
@@ -77,11 +94,11 @@ found_count=0
 temp_file=$(mktemp)
 
 # Search through all log files
-for logfile in *.log; do
+for logfile in "$@"; do
     echo "Searching in $logfile..."
     
     # Find log blocks containing the TXNID
-    awk -v txnid="$TXNID" -v filename="$logfile" -v all_blocks="$ALL_BLOCKS" '
+    "$AWK" -v txnid="$TXNID" -v filename="$logfile" -v all_blocks="$ALL_BLOCKS" '
     /<log[^>]*>/ {
         in_log_block = 1
         block_start_line = NR

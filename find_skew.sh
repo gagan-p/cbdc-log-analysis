@@ -1,5 +1,27 @@
 #!/bin/sh
 
+# Prefer GNU awk if available (macOS compatibility)
+if command -v gawk >/dev/null 2>&1; then AWK="gawk"; else AWK="awk"; fi
+# Prefer GNU date (gdate) if available for -d parsing
+if command -v gdate >/dev/null 2>&1; then DATE_BIN="gdate"; else DATE_BIN="date"; fi
+
+# Logs directory is chosen interactively at runtime (no flags/env required)
+
+# Always prompt for logs dir (default to existing LOGDIR or rtsp_logs)
+while :; do
+  read -r -p "Enter path to rtsp_q2 log repo (directory). Files must match rtsp_q2-*.log: " LOGDIR
+  if [ -z "$LOGDIR" ]; then
+    echo "Path is required."
+    continue
+  fi
+  set -- "$LOGDIR"/rtsp_q2-*.log
+  if [ "$1" = "$LOGDIR/rtsp_q2-*.log" ] || [ $# -eq 0 ]; then
+    echo "ERROR: No rtsp_q2-*.log files found in $LOGDIR"
+    continue
+  fi
+  break
+done
+
 # Find client-server timestamp skew in CBDC logs
 # - Scans *.log for TransactionManager <log ... at="..."> and client <Head ... ts="...">
 # - Computes skew_ms = client_ts_ms - server_at_ms per transaction block
@@ -100,22 +122,22 @@ if [ "$1" = "*.log" ] || [ $# -eq 0 ]; then
 fi
 
 # Count complete <log>...</log> blocks processed under TransactionManager realm (all files)
-COMPLETE_BLOCKS=$(awk '
+COMPLETE_BLOCKS=$("$AWK" '
   /<log[^"]*realm="org\.jpos\.transaction\.TransactionManager"/ { in_tx=1; next }
   in_tx && /<\/log>/ { blocks++; in_tx=0; next }
   END { print (blocks+0) }
-' "$@")
+' "$LOGDIR"/rtsp_q2-*.log)
 
 # Count blocks that contain a client <Head ... ts="..."> timestamp (all files)
-CLIENT_TS_BLOCKS=$(awk '
+CLIENT_TS_BLOCKS=$("$AWK" '
   /<log[^"]*realm="org\.jpos\.transaction\.TransactionManager"/ { in_tx=1; has_ts=0; next }
   in_tx && /<Head / { if (match($0, /ts="([^"]+)"/, a)) has_ts=1 }
   in_tx && /<\/log>/ { if (has_ts) cnt++; in_tx=0; next }
   END { print (cnt+0) }
-' "$@")
+' "$LOGDIR"/rtsp_q2-*.log)
 
 # Extract (file|server_at|client_ts|txn_type|msg_id|txn_id)
-records=$(awk '
+records=$("$AWK" '
   /<log[^>]*realm="org\.jpos\.transaction\.TransactionManager"/ {
     in_block=1; server_at=""; client_ts=""; txn_type=""; msg_id=""; txn_id="";
     if (match($0, /at="([^"]+)"/, a)) server_at=a[1];
@@ -137,22 +159,66 @@ records=$(awk '
     }
     in_block=0
   }
-' "$@")
+' "$LOGDIR"/rtsp_q2-*.log)
 
 # Function: ISO8601 to epoch ms (best-effort)
 to_epoch_ms() {
   ts="$1"
-  # Always interpret as UTC irrespective of any timezone suffix
+  # Normalize space to 'T'
+  ts_norm=$(printf "%s" "$ts" | tr ' ' 'T')
+  # Fractional milliseconds (truncate to 3 digits)
   frac_ms=0
-  if printf "%s" "$ts" | grep -q '\\.'; then
-    frac=$(printf "%s" "$ts" | sed 's/^[^.]*\\.//')
+  if printf "%s" "$ts_norm" | grep -q '\\.'; then
+    frac=$(printf "%s" "$ts_norm" | sed 's/^[^.]*\\.//')
     frac_ms=$(printf "%s" "$frac" | sed 's/[^0-9].*$//' | cut -c1-3)
     [ -z "$frac_ms" ] && frac_ms=0
   fi
-  base=$(printf "%s" "$ts" | sed -n 's/^\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}T[0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\}\).*/\1/p')
-  [ -z "$base" ] && base="$ts"
-  sec=$(date -u -d "$base" +%s 2>/dev/null || echo 0)
-  frac_val=$(printf "%s" "$frac_ms" | awk '{print ($0+0)}')
+  # Remove fractional seconds for parsing
+  ts_nf=$(printf "%s" "$ts_norm" | sed 's/\.[0-9][0-9]*//')
+
+  # 1) Prefer GNU date parse (handles offsets)
+  if sec=$($DATE_BIN -d "$ts_nf" +%s 2>/dev/null); then
+    :
+  else
+    # 2) BSD date with %z if possible (convert Z to +0000 and remove colon in offset)
+    ts_bsd=$(printf "%s" "$ts_nf" | sed 's/Z$/+0000/' | sed 's/\([+-][0-9][0-9]\):\([0-9][0-9]\)$/\1\2/')
+    if sec=$(date -j -u -f "%Y-%m-%dT%H:%M:%S%z" "$ts_bsd" +%s 2>/dev/null); then
+      :
+    else
+      # 3) Manual offset handling: parse base and tz, compute UTC
+      tz=$(printf "%s" "$ts_nf" | sed -n 's/.*\([+-][0-9][0-9]:[0-9][0-9]\|[+-][0-9][0-9][0-9][0-9]\|[+-][0-9][0-9]\|Z\)$/\1/p')
+      base=$(printf "%s" "$ts_nf" | sed 's/\([+-][0-9][0-9]:[0-9][0-9]\|[+-][0-9][0-9][0-9][0-9]\|[+-][0-9][0-9]\|Z\)$//')
+      if sec=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "$base" +%s 2>/dev/null); then
+        off_sec=0
+        case "$tz" in
+          Z|"") off_sec=0 ;;
+          [+|-][0-9][0-9]:[0-9][0-9])
+            sign=${tz%${tz#?}}
+            h=$(printf "%s" "$tz" | sed 's/^[-+]//;s/:.*$//')
+            m=$(printf "%s" "$tz" | sed 's/^.*://')
+            off_sec=$((10#$h*3600 + 10#$m*60))
+            if [ "$sign" = "+" ]; then sec=$((sec - off_sec)); else sec=$((sec + off_sec)); fi
+            ;;
+          [+|-][0-9][0-9][0-9][0-9])
+            sign=${tz%${tz#?}}
+            t=${tz#?}
+            h=${t%??}; m=${t#??}
+            off_sec=$((10#$h*3600 + 10#$m*60))
+            if [ "$sign" = "+" ]; then sec=$((sec - off_sec)); else sec=$((sec + off_sec)); fi
+            ;;
+          [+|-][0-9][0-9])
+            sign=${tz%${tz#?}}
+            h=${tz#?}
+            off_sec=$((10#$h*3600))
+            if [ "$sign" = "+" ]; then sec=$((sec - off_sec)); else sec=$((sec + off_sec)); fi
+            ;;
+        esac
+      else
+        sec=0
+      fi
+    fi
+  fi
+  frac_val=$(printf "%s" "$frac_ms" | "$AWK" '{print ($0+0)}')
   printf "%d" $(( sec*1000 + frac_val ))
 }
 
@@ -183,11 +249,11 @@ ROWS_ALL=$(build_rows 0 | sort -nr -k1,1)
 ROWS_THR=$(build_rows "$THRESHOLD_S" | sort -nr -k1,1)
 
 # Metrics based on filtered dataset
-TOTAL_PROCESSED=$(printf "%s\n" "$ROWS_ALL" | sed -n '/./p' | wc -l | awk '{print $1}')
-SKEW_GT_60=$(printf "%s\n" "$ROWS_ALL" | awk -F'\t' '{if(($1+0)>60000)c++} END{print c+0}')
-PCT_GT_60=$(awk -v a="$SKEW_GT_60" -v b="$TOTAL_PROCESSED" 'BEGIN{ if (b==0) {print "0.00"} else {printf "%.2f", (a*100.0)/b} }')
-TOTAL_SKEWED_THR=$(printf "%s\n" "$ROWS_THR" | sed -n '/./p' | wc -l | awk '{print $1}')
-UNIQUE_IDS=$(printf "%s\n" "$ROWS_ALL" | awk -F'\t' 'length($6)>0 { u[$6]=1 } END { print length(u)+0 }')
+TOTAL_PROCESSED=$(printf "%s\n" "$ROWS_ALL" | sed -n '/./p' | wc -l | "$AWK" '{print $1}')
+SKEW_GT_60=$(printf "%s\n" "$ROWS_ALL" | "$AWK" -F'\t' '{if(($1+0)>60000)c++} END{print c+0}')
+PCT_GT_60=$("$AWK" -v a="$SKEW_GT_60" -v b="$TOTAL_PROCESSED" 'BEGIN{ if (b==0) {print "0.00"} else {printf "%.2f", (a*100.0)/b} }')
+TOTAL_SKEWED_THR=$(printf "%s\n" "$ROWS_THR" | sed -n '/./p' | wc -l | "$AWK" '{print $1}')
+UNIQUE_IDS=$(printf "%s\n" "$ROWS_ALL" | "$AWK" -F'\t' 'length($6)>0 { u[$6]=1 } END { print length(u)+0 }')
 
 # Output
 if [ -z "$TSV" ]; then

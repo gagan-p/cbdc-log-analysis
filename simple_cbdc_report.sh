@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# Prefer GNU awk if available (macOS compatibility)
+if command -v gawk >/dev/null 2>&1; then AWK="gawk"; else AWK="awk"; fi
+
+# Logs directory is chosen interactively at runtime (no flags/env required)
+
 # CBDC Transaction Log Analysis Report
 # - Reads all *.log in current directory
 # - No caching, hashing, or temp files
@@ -96,6 +101,21 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# Always prompt for logs dir (default to existing LOGDIR or rtsp_logs)
+while :; do
+  read -r -p "Enter path to rtsp_q2 log repo (directory). Files must match rtsp_q2-*.log: " LOGDIR
+  if [ -z "$LOGDIR" ]; then
+    echo "Path is required."
+    continue
+  fi
+  set -- "$LOGDIR"/rtsp_q2-*.log
+  if [ "$1" = "$LOGDIR/rtsp_q2-*.log" ] || [ $# -eq 0 ]; then
+    echo "ERROR: No rtsp_q2-*.log files found in $LOGDIR" >&2
+    continue
+  fi
+  break
+done
+
 echo "======================================================"
 echo "CBDC Transaction Analysis Report"
 echo "Generated: $(date)"
@@ -113,11 +133,7 @@ echo "- sh simple_cbdc_report.sh --app --top-only --top 10 --top-by total_ms"
 echo "- sh simple_cbdc_report.sh --pso --compact"
 
 # Check for log files (POSIX sh)
-set -- *.log
-if [ "$1" = "*.log" ] || [ $# -eq 0 ]; then
-  echo "ERROR: No .log files found in current directory" >&2
-  exit 1
-fi
+# Files are now in "$@" from the prompt validation above
 
 echo ""
 echo "Processing $# log files..."
@@ -125,7 +141,7 @@ echo ""
 
 # Stage 0: Extract per-transaction records from all logs (pipe-delimited)
 # Fields: txn_type|processing_pattern|tps|peak|avg|elapsed_ms|active|max_sessions|in_transit|max_transit|status
-records=$(cat -- "$@" 2>/dev/null | tr -d '\r' | awk '
+records=$(cat -- "$@" 2>/dev/null | tr -d '\r' | "$AWK" '
   /<log[^"]*realm="org\.jpos\.transaction\.TransactionManager"/ {
     in_tx=1
     processing_pattern=""; txn_type=""; txn_id=""
@@ -175,7 +191,7 @@ records=$(cat -- "$@" 2>/dev/null | tr -d '\r' | awk '
 ')
 
 # Count complete <log>...</log> blocks processed under TransactionManager realm
-COMPLETE_BLOCKS=$(cat -- "$@" 2>/dev/null | tr -d '\r' | awk '
+COMPLETE_BLOCKS=$(cat -- "$@" 2>/dev/null | tr -d '\r' | "$AWK" '
   /<log[^"]*realm="org\.jpos\.transaction\.TransactionManager"/ { in_tx=1; next }
   in_tx && /<\/log>/ { blocks++; in_tx=0; next }
   END { print (blocks+0) }
@@ -183,7 +199,7 @@ COMPLETE_BLOCKS=$(cat -- "$@" 2>/dev/null | tr -d '\r' | awk '
 
 # Raw mode: print records without grouping and exit
 if [ -n "$RAW" ]; then
-  RAW_FILTERED=$(printf "%s\n" "$records" | awk -F'|' -v filter="$FILTER" '
+  RAW_FILTERED=$(printf "%s\n" "$records" | "$AWK" -F'|' -v filter="$FILTER" '
     filter=="" { print; next }
     filter=="APP" && $1 ~ /^APP\./ { print; next }
     filter=="PSO" && $1 ~ /^PSO\./ { print; next }
@@ -205,7 +221,7 @@ if [ -n "$RAW" ]; then
   echo "Summary: Total transactions analyzed: ${RAW_TOTAL:-0}"
   echo "Summary: Total complete <log> blocks processed: ${COMPLETE_BLOCKS:-0}"
   # Proxy for unique transaction ids/types using grouped pass
-  UNIQUE_TXN_TYPES=$(printf "%s\n" "$records" | awk -F'|' -v filter="$FILTER" '
+  UNIQUE_TXN_TYPES=$(printf "%s\n" "$records" | "$AWK" -F'|' -v filter="$FILTER" '
     filter=="" { t[$1]=1; next }
     filter=="APP" && $1 ~ /^APP\./ { t[$1]=1; next }
     filter=="PSO" && $1 ~ /^PSO\./ { t[$1]=1; next }
@@ -220,7 +236,7 @@ if [ -n "$RAW" ]; then
 fi
 
 # Stage 1: Aggregate APP and PSO transactions
-summary=$(printf "%s\n" "$records" | awk -F'|' -v compact="$COMPACT" -v filter="$FILTER" -v top_only="$TOP_ONLY" -v top_n="$TOP_N" -v top_metric="$TOP_METRIC" '
+summary=$(printf "%s\n" "$records" | "$AWK" -F'|' -v compact="$COMPACT" -v filter="$FILTER" -v top_only="$TOP_ONLY" -v top_n="$TOP_N" -v top_metric="$TOP_METRIC" '
   {
     txn=$1; pat=$2; tps=$3+0; peak=$4+0; avgv=$5+0; el=$6+0; act=$7+0; maxs=$8+0; tr=$9+0; maxtr=$10+0; st=$11
     if (txn == "") next

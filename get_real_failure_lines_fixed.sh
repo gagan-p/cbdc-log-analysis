@@ -16,6 +16,26 @@
 #   ./get_real_failure_lines_fixed.sh --tsv-table
 #   ./get_real_failure_lines_fixed.sh --detailed
 
+# Prefer GNU awk if available (macOS compatibility)
+if command -v gawk >/dev/null 2>&1; then AWK="gawk"; else AWK="awk"; fi
+
+# Logs directory is chosen interactively at runtime (no flags/env required)
+
+# Always prompt for logs dir (default to existing LOGDIR or rtsp_logs)
+while :; do
+  read -r -p "Enter path to rtsp_q2 log repo (directory). Files must match rtsp_q2-*.log: " LOGDIR
+  if [ -z "$LOGDIR" ]; then
+    echo "Path is required."
+    continue
+  fi
+  set -- "$LOGDIR"/rtsp_q2-*.log
+  if [ "$1" = "$LOGDIR/rtsp_q2-*.log" ] || [ $# -eq 0 ]; then
+    echo "ERROR: No rtsp_q2-*.log files found in $LOGDIR"
+    continue
+  fi
+  break
+done
+
 # Parse command line options
 DISPLAY_MODE="detailed"
 case "$1" in
@@ -54,11 +74,8 @@ echo "Display Mode: $DISPLAY_MODE"
 echo "Generated: $(date)"
 echo "======================================================="
 
-# Check if .log files exist
-if ! ls *.log >/dev/null 2>&1; then
-    echo "ERROR: No .log files found in current directory"
-    exit 1
-fi
+# Collect log files
+# Files are now in "$@" from the prompt validation above
 
 echo "Counting total transactions and extracting failures..."
 echo ""
@@ -70,11 +87,11 @@ abort_count=0
 total_txn_count=0
 
 # Process each log file
-for logfile in *.log; do
+for logfile in "$@"; do
     echo "Processing $logfile..."
     
     # Extract TransactionManager blocks and count total + failures
-    awk -v abort_count_var="$abort_count" -v total_txn_var="$total_txn_count" '
+    "$AWK" -v abort_count_var="$abort_count" -v total_txn_var="$total_txn_count" '
     /^<log.*realm="org.jpos.transaction.TransactionManager".*/ {
         in_txnmgr_block = 1
         block_content = ""
@@ -307,11 +324,11 @@ for logfile in *.log; do
     ' "$logfile" >> "$tmpfile"
     
     # Count total transactions from this file
-    total_from_file=$(awk '/^<log.*realm="org.jpos.transaction.TransactionManager".*/ { count++ } END { print count+0 }' "$logfile")
+    total_from_file=$("$AWK" '/^<log.*realm="org.jpos.transaction.TransactionManager".*/ { count++ } END { print count+0 }' "$logfile")
     total_txn_count=$((total_txn_count + total_from_file))
     
     # Count abort transactions from this file
-    abort_from_file=$(awk 'BEGIN { count = 0 } /<log.*realm="org.jpos.transaction.TransactionManager".*>/ { in_block = 1; has_abort = 0 } in_block && /<abort>/ { has_abort = 1 } in_block && /<\/log>/ { if (has_abort) count++; in_block = 0; has_abort = 0 } END { print count }' "$logfile")
+    abort_from_file=$("$AWK" 'BEGIN { count = 0 } /<log.*realm="org.jpos.transaction.TransactionManager".*>/ { in_block = 1; has_abort = 0 } in_block && /<abort>/ { has_abort = 1 } in_block && /<\/log>/ { if (has_abort) count++; in_block = 0; has_abort = 0 } END { print count }' "$logfile")
     abort_count=$((abort_count + abort_from_file))
 done
 
@@ -321,12 +338,12 @@ echo "CBDC TRANSACTION FAILURE ANALYSIS SUMMARY"
 echo "======================================================="
 
 # Count unique transaction IDs
-unique_txn_count=$(awk '/^1\. TxnID:/ { print substr($0, 11) }' "$tmpfile" | sort -u | wc -l)
+unique_txn_count=$("$AWK" '/^1\. TxnID:/ { print substr($0, 11) }' "$tmpfile" | sort -u | wc -l)
 
 # Count transactions with no failure reasons (no UseRC and no ExtRC)
 no_failure_reason_count=0
 if [ -s "$tmpfile" ]; then
-    no_failure_reason_count=$(awk '
+    no_failure_reason_count=$("$AWK" '
     BEGIN { 
         in_block = 0; count = 0
         has_use_rc = 0; has_extrc = 0
@@ -361,7 +378,7 @@ if [ "$DISPLAY_MODE" = "tsv" ]; then
     echo -e "TxnID\tUseRC1\tUseRC2\tUseRC3\tUseRC4\tExtRC1\tExtRC2"
     
     if [ -s "$tmpfile" ]; then
-        awk '
+        "$AWK" '
         BEGIN { 
             in_block = 0
         }
@@ -407,7 +424,7 @@ elif [ "$DISPLAY_MODE" = "summary" ]; then
     echo "==========================================="
     if [ -s "$tmpfile" ]; then
         # Extract first failure line for each transaction and group by pattern
-        awk '
+        "$AWK" '
         BEGIN { 
             in_block = 0
             txn_id = ""

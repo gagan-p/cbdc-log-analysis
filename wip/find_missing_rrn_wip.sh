@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# Prefer GNU awk if available (macOS compatibility)
+if command -v gawk >/dev/null 2>&1; then AWK="gawk"; else AWK="awk"; fi
+
+# Logs directory is chosen interactively at runtime (no flags/env required)
+
 # Find UPI transactions that are missing an RRN within TransactionManager blocks
 # - Scans *.log for <log realm="org.jpos.transaction.TransactionManager" ...> ... </log>
 # - Flags a block as UPI if it contains either the UPI schema URL or common UPI API names
@@ -78,15 +83,30 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+# Prompt for logs dir if not set
+while :; do
+  read -r -p "Enter path to rtsp_q2 log repo (directory). Files must match rtsp_q2-*.log: " LOGDIR
+  if [ -z "$LOGDIR" ]; then
+    echo "Path is required."
+    continue
+  fi
+  set -- "$LOGDIR"/rtsp_q2-*.log
+  if [ "$1" = "$LOGDIR/rtsp_q2-*.log" ] || [ $# -eq 0 ]; then
+    echo "ERROR: No rtsp_q2-*.log files found in $LOGDIR" >&2
+    continue
+  fi
+  break
+done
+
 # Check logs
-set -- *.log
-if [ "$1" = "*.log" ] || [ $# -eq 0 ]; then
-  echo "ERROR: No .log files found in current directory" >&2
+set -- "$LOGDIR"/rtsp_q2-*.log
+if [ "$1" = "$LOGDIR/rtsp_q2-*.log" ] || [ $# -eq 0 ]; then
+  echo "ERROR: No rtsp_q2-*.log files found in $LOGDIR" >&2
   exit 1
 fi
 
 # Build rows and summary in one awk pass; print TSV rows for missing RRN, then totals
-RESULT=$(awk -v filter="$FILTER" '
+RESULT=$("$AWK" -v filter="$FILTER" '
   function trimq(s){ gsub(/^"|"$/, "", s); return s }
 
   /<log[^>]*realm="org\.jpos\.transaction\.TransactionManager"/ {
@@ -135,9 +155,9 @@ RESULT=$(awk -v filter="$FILTER" '
 ' "$@")
 
 # Split rows and totals
-ROWS=$(printf "%s\n" "$RESULT" | awk -F"\t" '$1=="ROW" { $1=""; sub(/^\t/ ,""); print }')
-UPI_BLOCKS=$(printf "%s\n" "$RESULT" | awk -F"\t" '$1=="TOTALS" && $2=="UPI_BLOCKS" {print $3}')
-MISSING_RRN=$(printf "%s\n" "$RESULT" | awk -F"\t" '$1=="TOTALS" && $2=="MISSING_RRN" {print $3}')
+ROWS=$(printf "%s\n" "$RESULT" | "$AWK" -F"\t" '$1=="ROW" { $1=""; sub(/^\t/ ,""); print }')
+UPI_BLOCKS=$(printf "%s\n" "$RESULT" | "$AWK" -F"\t" '$1=="TOTALS" && $2=="UPI_BLOCKS" {print $3}')
+MISSING_RRN=$(printf "%s\n" "$RESULT" | "$AWK" -F"\t" '$1=="TOTALS" && $2=="MISSING_RRN" {print $3}')
 
 # Pretty header
 if [ -z "$TSV" ]; then
@@ -164,4 +184,3 @@ else
 fi
 
 exit 0
-
