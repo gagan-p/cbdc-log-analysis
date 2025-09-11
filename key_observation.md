@@ -13,7 +13,7 @@
 ### Analysis Scope & Methodology
 
 **Data Source Discovery:**
-- **Files Analyzed:** 7 CBDC transaction log files identified via `ls *.log`
+- **Files Analyzed:** 7 CBDC transaction log files identified via `ls rtsp_logs/rtsp_q2-*.log` (scripts now prompt for a logs directory and scan only `rtsp_q2-*.log`)
   ```
   rtsp_q2-2025-08-07-133854.log  rtsp_q2-2025-08-09-150117.log
   rtsp_q2-2025-08-07-151251.log  rtsp_q2-2025-08-09-152341.log  
@@ -29,10 +29,10 @@
 - **jPOS Source Review:** TransactionManager and TPS classes (for TPS and queue semantics)
 
 **Data Extraction Methodology:**
-- **Transaction Blocks:** `awk '/<log.*TransactionManager.*at=/ { in_tx=1 } /<\/log>/ { blocks++; in_tx=0 } END { print blocks }' *.log` → 15,077 total
-- **Performance Records:** `simple_cbdc_report.sh --raw | wc -l` → 6,841 transaction records
-- **Queue Measurements:** `find . -name "*.log" -exec grep "in-transit=" {} \; | wc -l` → 6,989 measurements
-- **Failure Analysis:** `./get_real_failure_lines_fixed.sh --summary-only` → 148 failures with comprehensive error code coverage
+- **Transaction Blocks:** `awk '/<log.*TransactionManager.*at=/ { in_tx=1 } /<\/log>/ { blocks++; in_tx=0 } END { print blocks }' <LOGS_DIR>/rtsp_q2-*.log` → 15,077 total
+- **Performance Records:** `sh simple_cbdc_report.sh --raw | wc -l` (enter `<LOGS_DIR>` when prompted) → 6,841 transaction records
+- **Queue Measurements:** `find <LOGS_DIR> -name 'rtsp_q2-*.log' -exec grep "in-transit=" {} + | wc -l` → 6,989 measurements
+- **Failure Analysis:** `./get_real_failure_lines_fixed.sh --summary-only` (enter `<LOGS_DIR>` when prompted) → 148 failures with comprehensive error code coverage
 
 **Verification Approach:** Every claim includes:
 1. **Source command** used to extract data
@@ -47,7 +47,7 @@
     - APP.ReqCreateDevice avg ~5.4s (max ~85s)
       **How we reached this conclusion:**
       1. **Discovery:** `sh simple_cbdc_report.sh --app --top-only --top 10 --top-by avg_dur` showed 5400ms average
-      2. **Volume Analysis:** `grep -c "TXNNAME: APP.ReqCreateDevice" *.log` → 36 transactions found
+      2. **Volume Analysis:** `grep -c "TXNNAME: APP.ReqCreateDevice" <LOGS_DIR>/rtsp_q2-*.log` → 36 transactions found
       3. **Participant Chain Investigation:** `./find_log_block_by_txnid.sh ReqCreateDevice --all-blocks` revealed complex 11-step workflow
       4. **HSM Correlation:** Identified cryptographic operations through participant analysis (fetch-token-wallet, check-rules, parse-issue-token steps)
       5. **File Evidence:** Peak latencies visible within the specified logs around the identified windows
@@ -68,7 +68,7 @@
       3. **Operation Analysis:** Transaction name indicates wallet key retrieval from external key management
       4. **Pattern Analysis:** Consistent delays suggest external service dependency bottleneck
       5. **File Evidence:** Delays documented in `rtsp_q2-2025-08-09-153134.log` lines 180,000-220,000
-      **Verification:** `sh simple_cbdc_report.sh --pso --top-only --top 5 --top-by avg_dur`
+      **Verification:** `sh simple_cbdc_report.sh --pso --top-only --top 5 --top-by avg_dur` (enter `<LOGS_DIR>` when prompted)
 
 **Overall Impact Analysis:** These three transaction types dominate performance impact due to combination of high latency and significant volume/frequency.
 
@@ -170,7 +170,7 @@ pools maxed creates queueing delay before work begins, contributing to 3-5 secon
     - **PSO TransactionManager:** Processes PSO.* transactions (2500 session pools)  
     - **MerchantPayout TransactionManager:** Specialized workflows (40 session pools)
     
-    **Evidence Sources:** jPOS TransactionManager and TPS classes; log correlation showing distinct TPS per pool
+    **Evidence Sources:** jPOS TransactionManager and TPS classes; log correlation showing distinct TPS per pool (analysis scripts now prompt for the logs directory at runtime)
     **period_nanos:** Fixed reference period for TPS calculation (default 1000ms = 1,000,000,000 nanoseconds) — the target measurement window.
     **interval_nanos:** Actual elapsed time since last TPS calculation (could be slightly more or less than the target period).
     **Formula:** `tps = (period_nanos * completed_count) / actual_interval_nanos` where the multiplication scales completed transactions to the target measurement period, then divides by actual elapsed time to get rate per target period (e.g., if 30 transactions completed in 0.5 seconds: (1,000,000,000 × 30) / 500,000,000 = 60 TPS).
@@ -190,9 +190,9 @@ pools maxed creates queueing delay before work begins, contributing to 3-5 secon
     | PSO.RespListKeys.ListKeys | 30 | 2847 | 93/147/204 | 316/385/397 | 85,421 |
     
     **Analysis Commands Used:**
-    - `sh simple_cbdc_report.sh --app --top-only --top 10 --top-by tps_max` → APP TPS analysis
-    - `sh simple_cbdc_report.sh --pso --top-only --top 10 --top-by tps_max` → PSO TPS analysis
-    - `sh simple_cbdc_report.sh --top-only --top 20` → Combined analysis showing TPS patterns
+    - `sh simple_cbdc_report.sh --app --top-only --top 10 --top-by tps_max` (enter `<LOGS_DIR>` when prompted) → APP TPS analysis
+    - `sh simple_cbdc_report.sh --pso --top-only --top 10 --top-by tps_max` (enter `<LOGS_DIR>` when prompted) → PSO TPS analysis
+    - `sh simple_cbdc_report.sh --top-only --top 20` (enter `<LOGS_DIR>` when prompted) → Combined analysis showing TPS patterns
 
 - Large in-transit queues: queue depths significantly exceed normal operating levels, creating transaction delays.
 
@@ -200,14 +200,14 @@ pools maxed creates queueing delay before work begins, contributing to 3-5 secon
 
     **How we reached this conclusion:**
     1. **Initial Observation:** User questioned meaning of "ratios spike (e.g., up to 2129)" in original analysis
-    2. **Log Pattern Investigation:** `grep "in-transit=" *.log` revealed format: `in-transit=current/max_seen`
-    3. **Data Extraction:** `find . -name "*.log" -exec grep "in-transit=" {} \; | sed 's/.*in-transit=\([0-9]*\).*/\1/'` extracted 6,989 measurements
+    2. **Log Pattern Investigation:** `grep "in-transit=" <LOGS_DIR>/rtsp_q2-*.log` revealed format: `in-transit=current/max_seen`
+    3. **Data Extraction:** `find <LOGS_DIR> -name 'rtsp_q2-*.log' -exec grep "in-transit=" {} + | sed 's/.*in-transit=\([0-9]*\).*/\1/'` extracted 6,989 measurements
     4. **Statistical Analysis:** Calculated min(0), median(130), max(343), 90th percentile(286) from extracted data
     5. **jPOS Source Review:** TransactionManager queue mechanism:
        - `in-transit = head.get() - tail.get()` (queue depth)
        - `id = head.getAndIncrement()` (enqueue)
        - `checkTail()` advances `tail` when transactions complete
-    6. **Peak Evidence Discovery:** `find . -name "*.log" -exec grep -n "in-transit=343/" {} \;` located exact peak occurrence
+    6. **Peak Evidence Discovery:** `find <LOGS_DIR> -name 'rtsp_q2-*.log' -exec grep -n "in-transit=343/" {} +` located exact peak occurrence
     7. **Context Analysis:** Peak occurred with PSO pool at 2500/2500 capacity (correlated stress)
 
     **Evidence of "Large" Queues (Statistical analysis of 6,989 measurements):**
@@ -230,10 +230,10 @@ pools maxed creates queueing delay before work begins, contributing to 3-5 secon
     - High pressure (201-300): 8.9% of measurements  
     - Extreme pressure (300+): 6.8% of measurements (473 instances)
     
-    **Analysis Method:**
+    **Analysis Method (adjust `<LOGS_DIR>`):**
     ```bash
     # Extract all in-transit values
-    find . -name "*.log" -exec grep "in-transit=" {} \; | sed 's/.*in-transit=\([0-9]*\).*/\1/' > temp_values.txt
+    find <LOGS_DIR> -name 'rtsp_q2-*.log' -exec grep "in-transit=" {} + | sed 's/.*in-transit=\([0-9]*\).*/\1/' > temp_values.txt
     
     # Calculate statistics  
     sort -n temp_values.txt | awk 'NR==1{min=$1} {sum+=$1} END {
