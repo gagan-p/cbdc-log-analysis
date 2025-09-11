@@ -42,7 +42,7 @@ echo "Total in-transit measurements: $total_count"
 # Calculate statistics
 min_val=$(sort -n "$temp_file" | head -1)
 max_val=$(sort -nr "$temp_file" | head -1)
-avg_val=$(awk '{sum+=$1} END {printf "%.1f", sum/NR}' "$temp_file")
+avg_val=$("$AWK" '{sum+=$1} END {printf "%.1f", sum/NR}' "$temp_file")
 
 # Calculate median
 median_val=$(sort -n "$temp_file" | "$AWK" -v c="$total_count" 'NR==int(c/2)+1{print}')

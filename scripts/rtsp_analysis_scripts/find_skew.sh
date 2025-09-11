@@ -114,12 +114,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# Check logs
-set -- *.log
-if [ "$1" = "*.log" ] || [ $# -eq 0 ]; then
-  echo "ERROR: No .log files found in current directory" >&2
-  exit 1
-fi
+# Check logs: files are in "$@" from the prompt validation above
 
 # Count complete <log>...</log> blocks processed under TransactionManager realm (all files)
 COMPLETE_BLOCKS=$("$AWK" '
