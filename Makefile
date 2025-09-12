@@ -1,32 +1,23 @@
-.PHONY: help check
+.PHONY: help check clean clobber clean-backup list-outputs
 
 help:
 	@echo "CBDC Log Analysis - Script Help"
 	@echo "Generated: $$(date)"
 	@echo ""
-	@echo "--- get_real_failure_lines_fixed.sh ---"
-	@bash get_real_failure_lines_fixed.sh --help || true
+	@echo "Scripts (interactive; prompt for rtsp_q2 logs):"
+	@echo "- scripts/rtsp_analysis_scripts/get_real_failure_lines_fixed.sh"
+	@echo "- scripts/rtsp_analysis_scripts/simple_cbdc_report.sh"
+	@echo "- scripts/rtsp_analysis_scripts/find_log_block_by_txnid.sh"
+	@echo "- scripts/rtsp_analysis_scripts/find_skew.sh"
+	@echo "- scripts/rtsp_analysis_scripts/analyze_queue_depths.sh"
+	@echo "- scripts/rtsp_analysis_scripts/count_transaction_managers.sh"
 	@echo ""
-	@echo "--- simple_cbdc_report.sh ---"
-	@sh simple_cbdc_report.sh --help || true
+	@echo "WIP:"
+	@echo "- scripts/wip/find_missing_rrn_wip.sh"
+	@echo "- scripts/wip/upi_summary_wip.sh"
 	@echo ""
-	@echo "--- find_log_block_by_txnid.sh ---"
-	@bash find_log_block_by_txnid.sh --help || true
-	@echo ""
-	@echo "--- find_skew.sh ---"
-	@sh find_skew.sh --help || true
-	@echo ""
-	@echo "--- find_missing_rrn_wip.sh ---"
-	@sh find_missing_rrn_wip.sh --help || true
-	@echo ""
-	@echo "--- upi_summary_wip.sh ---"
-	@sh upi_summary_wip.sh --help || true
-	@echo ""
-	@echo "--- analyze_queue_depths.sh ---"
-	@echo "Usage: bash analyze_queue_depths.sh    # scans *.log and prints stats"
-	@echo ""
-	@echo "--- count_transaction_managers.sh ---"
-	@echo "Usage: bash count_transaction_managers.sh  # infers TM pools from logs"
+	@echo "Outputs are written to scripts/output with timestamps."
+	@echo "Use 'make clean' to remove generated outputs and caches."
 
 check:
 	@echo "CBDC Log Analysis - Environment Check"
@@ -76,3 +67,17 @@ check:
 	  echo "Environment check: FAIL (see warnings above)"; \
 	  exit 1; \
 	fi
+
+clean:
+	@echo "Cleaning generated outputs (no backup)..."
+	@bash scripts/helper/cleanup_outputs.sh --no-backup --yes
+
+clean-backup:
+	@echo "Backing up and cleaning generated outputs..."
+	@bash scripts/helper/cleanup_outputs.sh --backup --yes
+
+list-outputs:
+	@bash scripts/helper/cleanup_outputs.sh --list
+
+clobber: clean
+	@echo "No additional artifacts to clobber."
