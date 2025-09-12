@@ -1,4 +1,6 @@
 #!/bin/bash
+# Caching/output integrated via scripts/helper/cache_utils.sh
+# For template usage, see scripts/helper/cache_template.sh
 
 # get_real_failure_lines.sh - Extract actual failure content from ABORT blocks only
 #

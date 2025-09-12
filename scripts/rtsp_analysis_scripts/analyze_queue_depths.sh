@@ -1,4 +1,6 @@
 #!/bin/bash
+# Caching/output integrated via scripts/helper/cache_utils.sh
+# For template usage, see scripts/helper/cache_template.sh
 
 # Prefer GNU awk if available (macOS compatibility)
 if command -v gawk >/dev/null 2>&1; then AWK="gawk"; else AWK="awk"; fi
