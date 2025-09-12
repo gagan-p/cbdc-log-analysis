@@ -26,18 +26,15 @@ echo "=== TransactionManager Instance Analysis ==="
 ARGS_SIG=""
 cache_prepare "count_transaction_managers" "$0" "$ARGS_SIG" "$LOGDIR"/rtsp_q2-*.log
 
-if [ "$CACHE_STATUS" = "noop" ]; then
-  echo "No changes detected (inputs and script unchanged). Skipping run."
-  echo "Previous outputs: $CACHE_LAST_OUTPUTS"
-  exit 0
-elif [ "$CACHE_STATUS" = "duplicate" ]; then
-  echo "Inputs unchanged; script changed. Duplicating previous outputs with new timestamp."
+if [ "$CACHE_STATUS" = "rotate" ]; then
+  echo "Rotating outputs to new timestamp (no recompute)."
   cache_duplicate_outputs
   cache_save_meta
   echo "New outputs: $CACHE__OUTPUTS"
   exit 0
 fi
 
+cache_remove_last_outputs
 OUT_FILE="$CACHE_OUT_DIR/count_transaction_managers_${CACHE_TS}.txt"
 cache_register_output "$OUT_FILE"
 exec > >(tee "$OUT_FILE") 2>&1

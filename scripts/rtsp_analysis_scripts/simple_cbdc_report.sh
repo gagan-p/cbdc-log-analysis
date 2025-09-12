@@ -123,12 +123,8 @@ done
 ARGS_SIG="FILTER=$FILTER;TOP_ONLY=$TOP_ONLY;TOP_N=$TOP_N;TOP_BY=$TOP_METRIC;COMPACT=$COMPACT;RAW=$RAW"
 cache_prepare "simple_cbdc_report" "$0" "$ARGS_SIG" "$@"
 
-if [ "$CACHE_STATUS" = "noop" ]; then
-  echo "No changes detected (inputs and script unchanged). Skipping run."
-  echo "Previous outputs: $CACHE_LAST_OUTPUTS"
-  exit 0
-elif [ "$CACHE_STATUS" = "duplicate" ]; then
-  echo "Inputs unchanged; script changed. Duplicating previous outputs with new timestamp."
+if [ "$CACHE_STATUS" = "rotate" ]; then
+  echo "Rotating outputs to new timestamp (no recompute)."
   cache_duplicate_outputs
   cache_save_meta
   echo "New outputs: $CACHE__OUTPUTS"
@@ -429,5 +425,6 @@ printf "%s\n" "$summary" | sed -n '0,/^=== ADDITIONAL DETAILED DATA ===/d;p'
 
 echo ""
 echo "Saved report: $OUT_FILE"
+cache_prune_previous_outputs
 cache_save_meta
 exit 0

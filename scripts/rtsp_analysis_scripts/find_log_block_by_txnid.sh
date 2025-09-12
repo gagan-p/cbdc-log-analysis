@@ -90,18 +90,15 @@ done
 ARGS_SIG="TXNID=$TXNID;COUNT=$COUNT_LINES;SHOW=$SHOW_LINES;FILE_ONLY=$FILE_ONLY;ALL=$ALL_BLOCKS"
 cache_prepare "find_log_block_by_txnid" "$0" "$ARGS_SIG" "$@"
 
-if [ "$CACHE_STATUS" = "noop" ]; then
-    echo "No changes detected (inputs and script unchanged). Skipping run."
-    echo "Previous outputs: $CACHE_LAST_OUTPUTS"
-    exit 0
-elif [ "$CACHE_STATUS" = "duplicate" ]; then
-    echo "Inputs unchanged; script changed. Duplicating previous outputs with new timestamp."
+if [ "$CACHE_STATUS" = "rotate" ]; then
+    echo "Rotating outputs to new timestamp (no recompute)."
     cache_duplicate_outputs
     cache_save_meta
     echo "New outputs: $CACHE__OUTPUTS"
     exit 0
 fi
 
+cache_remove_last_outputs
 OUT_FILE="$CACHE_OUT_DIR/find_log_block_by_txnid_${CACHE_TS}.txt"
 cache_register_output "$OUT_FILE"
 exec > >(tee "$OUT_FILE") 2>&1
@@ -229,4 +226,5 @@ echo "Search complete. Found $found_count block(s) containing TXNID: $TXNID"
 # Cleanup
 rm -f "$temp_file"
 echo "Saved output: $OUT_FILE"
+cache_prune_previous_outputs
 cache_save_meta

@@ -29,12 +29,8 @@ done
 ARGS_SIG="THRESH=$THRESHOLD_S;TOP=$TOP_N;FILTER=$FILTER;TSV=$TSV;ALL=$ALL"
 cache_prepare "find_skew" "$0" "$ARGS_SIG" "$@"
 
-if [ "$CACHE_STATUS" = "noop" ]; then
-  echo "No changes detected (inputs and script unchanged). Skipping run."
-  echo "Previous outputs: $CACHE_LAST_OUTPUTS"
-  exit 0
-elif [ "$CACHE_STATUS" = "duplicate" ]; then
-  echo "Inputs unchanged; script changed. Duplicating previous outputs with new timestamp."
+if [ "$CACHE_STATUS" = "rotate" ]; then
+  echo "Rotating outputs to new timestamp (no recompute)."
   cache_duplicate_outputs
   cache_save_meta
   echo "New outputs: $CACHE__OUTPUTS"

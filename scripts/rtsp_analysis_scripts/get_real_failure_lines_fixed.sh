@@ -587,6 +587,14 @@ else
 fi
 
 if [ "$create_outputs" = "yes" ]; then
+  # remove previous outputs for this script (if any) before creating new
+  . scripts/helper/cache_utils.sh
+  CACHE_LAST_OUTPUTS=""
+  if [ -f ".cache/get_real_failure_lines_fixed.meta" ]; then
+    # shellcheck disable=SC1090
+    . .cache/get_real_failure_lines_fixed.meta
+  fi
+  for p in $CACHE_LAST_OUTPUTS; do rm -f "$p" 2>/dev/null || true; done
   abort_file="abort_failures_${ts}.txt"
   tsv_file="table_failed_txn_${ts}.txt"
 
@@ -617,21 +625,25 @@ if [ "$create_outputs" = "yes" ]; then
   fi
   echo "TSV table saved to: $tsv_file"
 
-  # Update meta
+  # Update meta (also track outputs for rotation on next runs)
   {
     echo "last_input_hash='$input_hash'"
     echo "last_script_hash='$script_hash'"
-    echo "last_abort_file='$abort_file'"
-    echo "last_tsv_file='$tsv_file'"
+    echo "CACHE_LAST_OUTPUTS='scripts/output/$abort_file scripts/output/$tsv_file'"
   } > "$meta_file"
 else
-  echo ""
-  echo "No new outputs created (input unchanged and script unchanged)."
-  if [ -n "$last_abort_file" ] || [ -n "$last_tsv_file" ]; then
-    echo "Previous outputs:"
-    [ -n "$last_abort_file" ] && echo "- $last_abort_file"
-    [ -n "$last_tsv_file" ] && echo "- $last_tsv_file"
-  fi
+  # Inputs & script unchanged: rotate outputs to new timestamp (no recompute)
+  . scripts/helper/cache_utils.sh
+  CACHE_LAST_OUTPUTS=""
+  if [ -f "$meta_file" ]; then . "$meta_file"; fi
+  CACHE_OUT_DIR="scripts/output"; CACHE_TS="$ts"
+  cache_duplicate_outputs
+  {
+    echo "last_input_hash='$input_hash'"
+    echo "last_script_hash='$script_hash'"
+    echo "CACHE_LAST_OUTPUTS='$CACHE__OUTPUTS'"
+  } > "$meta_file"
+  echo "Rotated outputs to new timestamp: $CACHE__OUTPUTS"
 fi
 
 # Cleanup

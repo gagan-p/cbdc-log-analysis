@@ -80,8 +80,8 @@ Each script is interactive and will prompt for the logs directory; enter your pa
 
 ## Notes on Re-Runs
 
-- If you re-run without changes to logs or scripts, the helper skips computation and prints previous output paths.
-- If you modify a script but keep the same inputs, the helper duplicates the last outputs with a new timestamp.
+- If you re-run without changes to logs or scripts, the helper rotates outputs: duplicates the last outputs with a new timestamp and removes the prior ones (no recompute).
+- If you modify a script but keep the same inputs, the helper also rotates outputs: duplicates with a new timestamp and removes the prior ones (no recompute).
 - If logs change (new or edited `rtsp_q2-*.log` files), the helper recomputes and emits fresh outputs.
 
 ## Housekeeping

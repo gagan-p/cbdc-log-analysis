@@ -65,12 +65,12 @@ cache_prepare() {
     . "$CACHE_META_FILE"
   fi
 
-  if [ "$files_hash" != "$last_files_hash" ] || [ -z "$last_files_hash" ]; then
+  if [ -z "$last_files_hash" ]; then
     CACHE_STATUS="run"
-  elif [ "$script_hash" != "$last_script_hash" ]; then
-    CACHE_STATUS="duplicate"
+  elif [ "$files_hash" != "$last_files_hash" ] || [ "$script_hash" != "$last_script_hash" ]; then
+    CACHE_STATUS="run"
   else
-    CACHE_STATUS="noop"
+    CACHE_STATUS="rotate"
   fi
 
   # export for callers
@@ -100,11 +100,26 @@ cache_duplicate_outputs() {
     base="$(basename "$p")"
     ext="${base##*.}"
     stem="${base%.*}"
-    # remove any old timestamp and append new one
+    # remove any old timestamp suffix and append new one
     new="$CACHE_OUT_DIR/${stem%_*}_$CACHE_TS.${ext}"
     cp -f "$p" "$new" 2>/dev/null || true
     if [ -z "$new_outputs" ]; then new_outputs="$new"; else new_outputs="$new_outputs $new"; fi
   done
+  # after duplicating, remove previous outputs to keep folder clean
+  for p in $CACHE_LAST_OUTPUTS; do
+    rm -f "$p" 2>/dev/null || true
+  done
   CACHE__OUTPUTS="$new_outputs"
 }
 
+cache_remove_last_outputs() {
+  # remove previously generated outputs for this script (if any)
+  for p in $CACHE_LAST_OUTPUTS; do
+    rm -f "$p" 2>/dev/null || true
+  done
+}
+
+cache_prune_previous_outputs() {
+  # alias for clarity at call sites (after successful write of new outputs)
+  cache_remove_last_outputs
+}
